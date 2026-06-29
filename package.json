@@ -1,6 +1,6 @@
 {
   "name": "llm-message-react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "React component for rendering streaming LLM markdown, repairing incomplete tokens mid-stream, with GFM, KaTeX math and Shiki code highlighting.",
   "type": "module",
   "license": "MIT",

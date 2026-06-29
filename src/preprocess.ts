@@ -30,12 +30,15 @@ export function preprocessLaTeX(content: string): string {
   // Single-dollar inline math whose content begins with a digit (e.g.
   // `$15 \text{ г}$`) is protected too: without this its opening `$` would be
   // escaped as currency in Step 3, unbalancing the delimiters so remark-math
-  // swallows the rest of the paragraph as one math region. We only protect
-  // single-dollar spans that contain a LaTeX command (`\…`), so plain currency
-  // prose like `$5 and $10` is left for Step 3 to handle.
+  // swallows the rest of the paragraph as one math region. Two shapes qualify:
+  //   1. spans containing a LaTeX command (`\…`), e.g. `$15 \text{ г}$`;
+  //   2. balanced spans whose content is purely numeric/math (digits, spaces
+  //      and basic operators, no prose letters), e.g. `$0$` or `$1288 / 3$`.
+  // Both leave plain currency prose like `$5 and $10` for Step 3, because that
+  // text contains letters between the dollars and so matches neither shape.
   const latexExpressions: string[] = [];
   content = content.replace(
-    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\)|\$(?!\$)[^$\n]*?\\[a-zA-Z][^$\n]*?\$)/g,
+    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\)|\$(?!\$)[^$\n]*?\\[a-zA-Z][^$\n]*?\$|\$(?!\$)\d[\d\s.,+\-*/=]*\$)/g,
     (match) => {
       latexExpressions.push(match);
       return `<<LATEX_${latexExpressions.length - 1}>>`;
