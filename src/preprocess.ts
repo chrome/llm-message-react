@@ -26,9 +26,16 @@ export function preprocessLaTeX(content: string): string {
   // escaping in Step 3 safe: by pulling complete `$$…$$` / `\[…\]` / `\(…\)`
   // regions out of the string first, the `\$(?=\d)` pass below cannot corrupt a
   // `$` that legitimately belongs to a math expression (e.g. `$$x = $5$$`).
+  //
+  // Single-dollar inline math whose content begins with a digit (e.g.
+  // `$15 \text{ г}$`) is protected too: without this its opening `$` would be
+  // escaped as currency in Step 3, unbalancing the delimiters so remark-math
+  // swallows the rest of the paragraph as one math region. We only protect
+  // single-dollar spans that contain a LaTeX command (`\…`), so plain currency
+  // prose like `$5 and $10` is left for Step 3 to handle.
   const latexExpressions: string[] = [];
   content = content.replace(
-    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\))/g,
+    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\)|\$(?!\$)[^$\n]*?\\[a-zA-Z][^$\n]*?\$)/g,
     (match) => {
       latexExpressions.push(match);
       return `<<LATEX_${latexExpressions.length - 1}>>`;
