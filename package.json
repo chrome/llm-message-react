@@ -1,0 +1,103 @@
+{
+  "name": "llm-message-react",
+  "version": "0.1.0",
+  "description": "React component for rendering streaming LLM markdown, repairing incomplete tokens mid-stream, with GFM, KaTeX math and Shiki code highlighting.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Aleksandr Afonasev <dify.chrome@gmail.com>",
+  "homepage": "https://github.com/chrome/llm-message-react#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrome/llm-message-react.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chrome/llm-message-react/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "react",
+    "markdown",
+    "llm",
+    "chat",
+    "ai",
+    "katex",
+    "shiki",
+    "gfm"
+  ],
+  "sideEffects": [
+    "*.css"
+  ],
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./shiki": {
+      "types": "./dist/highlighters/shiki.d.ts",
+      "import": "./dist/highlighters/shiki.js",
+      "require": "./dist/highlighters/shiki.cjs"
+    },
+    "./shiki-web": {
+      "types": "./dist/highlighters/shikiWeb.d.ts",
+      "import": "./dist/highlighters/shikiWeb.js",
+      "require": "./dist/highlighters/shikiWeb.cjs"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18",
+    "shiki": ">=1"
+  },
+  "peerDependenciesMeta": {
+    "shiki": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "katex": "^0.16.22",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "shiki": "^4.3.0",
+    "tsup": "^8.5.1",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^4.1.9"
+  }
+}
