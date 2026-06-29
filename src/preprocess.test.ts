@@ -93,6 +93,24 @@ describe("preprocessLaTeX", () => {
     expect(preprocessLaTeX("Pay $10 for \\(x\\)")).toBe("Pay \\$10 for $x$");
   });
 
+  it("does not escape single-dollar math that begins with a digit", () => {
+    expect(preprocessLaTeX("total $15 \\text{ g}$ of fat")).toBe(
+      "total $15 \\text{ g}$ of fat",
+    );
+  });
+
+  it("keeps multiple inline math spans on one line intact", () => {
+    const input =
+      "about $\\mathbf{135 \\text{ kcal}}$ and only $15 \\text{ g}$ of fat";
+    expect(preprocessLaTeX(input)).toBe(input);
+  });
+
+  it("still escapes currency next to digit-leading inline math", () => {
+    expect(preprocessLaTeX("Pay $10 then $2 \\text{ g}$ left")).toBe(
+      "Pay \\$10 then $2 \\text{ g}$ left",
+    );
+  });
+
   it("returns plain text unchanged", () => {
     expect(preprocessLaTeX("just some words")).toBe("just some words");
   });

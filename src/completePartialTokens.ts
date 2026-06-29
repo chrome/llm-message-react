@@ -286,7 +286,16 @@ function repairIncompleteMath(
   } else {
     // Inline math: $ ... $. Mask complete "$$" pairs (keeping indices stable),
     // then ignore escaped "\$" and currency like "$5" to avoid false positives.
-    const masked = text.replace(/\$\$/g, "  ");
+    let masked = text.replace(/\$\$/g, "  ");
+    // Also mask complete single-line "$…$" spans that contain a LaTeX command
+    // (so they are real math, not "$5" currency). Their opening "$" may be
+    // followed by a digit (e.g. "$15 \text{ г}$"), which the currency guard
+    // below would otherwise drop from the count while still counting the
+    // closing "$", flipping the parity and hiding trailing content by mistake.
+    masked = masked.replace(
+      /(?<!\\)\$(?!\$)[^$\n]*?\\[a-zA-Z][^$\n]*?\$/g,
+      (m) => " ".repeat(m.length),
+    );
     let lastDollar = -1;
     for (const match of masked.matchAll(/(?<!\\)\$(?!\d)/g)) {
       lastDollar = match.index;

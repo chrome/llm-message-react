@@ -227,6 +227,17 @@ describe("completePartialTokens", () => {
       expect(completePartialTokens("It costs $5")).toBe("It costs $5");
     });
 
+    it("keeps complete inline math whose content begins with a digit", () => {
+      const input = "total $15 \\text{ g}$ of fat, plus $(\\approx 40)$.";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
+    it("does not hide trailing text after digit-leading inline math", () => {
+      const input =
+        "about $\\mathbf{135}$ and $15 \\text{ g}$ of fat **bold** tail.";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
     it("does not treat an escaped dollar as math", () => {
       expect(completePartialTokens("price \\$ here")).toBe("price \\$ here");
     });
