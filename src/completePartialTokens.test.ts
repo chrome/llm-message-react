@@ -241,6 +241,17 @@ describe("completePartialTokens", () => {
     it("does not treat an escaped dollar as math", () => {
       expect(completePartialTokens("price \\$ here")).toBe("price \\$ here");
     });
+
+    it("does not hide trailing text after a balanced numeric span", () => {
+      const input = "Углеводы: $0$ г\nи дальше ещё текст.";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
+    it("keeps an odd number of command-free numeric spans intact", () => {
+      const input =
+        "**Белки:** $0$ г\n**Жиры:** $\\mathbf{15}$ г\n**Углеводы:** $0$ г\n**Ккал:** $\\mathbf{135}$ ккал\nИтог.";
+      expect(completePartialTokens(input)).toBe(input);
+    });
   });
 
   describe("progressive block math", () => {

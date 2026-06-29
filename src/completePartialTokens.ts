@@ -296,6 +296,16 @@ function repairIncompleteMath(
       /(?<!\\)\$(?!\$)[^$\n]*?\\[a-zA-Z][^$\n]*?\$/g,
       (m) => " ".repeat(m.length),
     );
+    // Same parity hazard for command-free numeric spans (e.g. "$0$", "$15$"):
+    // the opening "$" is dropped by the currency guard below while the closing
+    // "$" is still counted. Mask these balanced numeric spans too so neither
+    // delimiter is counted. Plain currency ("$5 and $10") has prose between the
+    // dollars, so it matches neither this nor the command mask and is left for
+    // the currency guard to handle.
+    masked = masked.replace(
+      /(?<!\\)\$(?!\$)\d[\d\s.,+\-*/=]*\$/g,
+      (m) => " ".repeat(m.length),
+    );
     let lastDollar = -1;
     for (const match of masked.matchAll(/(?<!\\)\$(?!\d)/g)) {
       lastDollar = match.index;
