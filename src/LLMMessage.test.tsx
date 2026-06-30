@@ -378,8 +378,10 @@ describe("LLMMessage", () => {
     });
 
     it("fades a thematic break as a single unit", () => {
+      // The fade applies to the active (last) block, so the thematic break must
+      // be the last block to be wrapped in a fade block.
       const { container } = render(
-        <LLMMessage smoothReveal>{"a\n\n---\n\nb"}</LLMMessage>,
+        <LLMMessage smoothReveal>{"a\n\n---"}</LLMMessage>,
       );
       const block = container.querySelector(".llm-fade-block");
       expect(block?.querySelector("hr")).toBeInTheDocument();
@@ -390,6 +392,90 @@ describe("LLMMessage", () => {
       const quote = container.querySelector<HTMLElement>(".llm-blockquote");
       expect(quote).not.toHaveClass("llm-fade");
       expect(quote?.style.getPropertyValue("--i")).toBe("");
+    });
+  });
+
+  describe("block memoization", () => {
+    const multiBlock =
+      "# Title\n\nFirst paragraph.\n\n```js\nconst a = 1;\n```\n\nLast paragraph.";
+
+    it("renders multi-block content identically with memoization on and off", () => {
+      const { container: on } = render(
+        <LLMMessage blockMemoization>{multiBlock}</LLMMessage>,
+      );
+      const { container: off } = render(
+        <LLMMessage blockMemoization={false}>{multiBlock}</LLMMessage>,
+      );
+      // Identical element structure; the only difference is the whitespace text
+      // nodes react-markdown inserts between top-level siblings in the
+      // single-tree path, which are visually irrelevant.
+      const normalize = (html: string | undefined) =>
+        (html ?? "").replace(/>\s+</g, "><");
+      expect(normalize(on.querySelector(".llm-message")?.innerHTML)).toBe(
+        normalize(off.querySelector(".llm-message")?.innerHTML),
+      );
+    });
+
+    it("keeps an earlier block's DOM node across a streaming chunk", () => {
+      const head = "First paragraph.\n\n";
+      const { container, rerender } = render(
+        <LLMMessage>{`${head}Streaming ta`}</LLMMessage>,
+      );
+      const firstBefore = container.querySelector(".llm-message")?.firstChild;
+      const lastBefore = container.querySelector(".llm-message")?.lastChild;
+
+      rerender(<LLMMessage>{`${head}Streaming tail is now longer`}</LLMMessage>);
+      const firstAfter = container.querySelector(".llm-message")?.firstChild;
+      const lastAfter = container.querySelector(".llm-message")?.lastChild;
+
+      // The stable first block keeps the same DOM node (not re-rendered)...
+      expect(firstAfter).toBe(firstBefore);
+      // ...while the streaming last block updates its text in place.
+      expect(lastBefore).toBe(lastAfter);
+      expect(lastAfter).toHaveTextContent("Streaming tail is now longer");
+    });
+
+    it("only the last block carries fade spans when smoothReveal is on", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"First paragraph.\n\nSecond stream"}</LLMMessage>,
+      );
+      const paragraphs = container.querySelectorAll<HTMLElement>(".llm-p");
+      expect(paragraphs).toHaveLength(2);
+      // The earlier, settled block renders as plain markup (no per-char spans).
+      expect(paragraphs[0].querySelector(".llm-char")).not.toBeInTheDocument();
+      // The active block fades its characters in.
+      expect(paragraphs[1].querySelector(".llm-char")).toBeInTheDocument();
+    });
+
+    it("renders the whole document as one block when footnotes are present", () => {
+      const { container } = render(
+        <LLMMessage>{"Text with a note[^1]\n\n[^1]: the note"}</LLMMessage>,
+      );
+      // Footnotes resolve across blocks, so the renderer keeps them together and
+      // produces the footnote section.
+      expect(container.querySelector(".llm-message")).toHaveTextContent(
+        "the note",
+      );
+    });
+
+    it("does not leak sealed-block cache entries after a full message replace", () => {
+      const messageA = "Alpha block.\n\nBeta block.";
+      const messageB = "Gamma block.\n\nDelta block.";
+      const { container, rerender } = render(<LLMMessage>{messageA}</LLMMessage>);
+      expect(container.querySelector(".llm-message")).toHaveTextContent(
+        "Alpha block.Beta block.",
+      );
+
+      rerender(<LLMMessage>{messageB}</LLMMessage>);
+      expect(container.querySelector(".llm-message")).toHaveTextContent(
+        "Gamma block.Delta block.",
+      );
+      expect(container.querySelector(".llm-message")).not.toHaveTextContent(
+        "Alpha",
+      );
+      expect(container.querySelector(".llm-message")).not.toHaveTextContent(
+        "Beta",
+      );
     });
   });
 
