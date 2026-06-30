@@ -56,28 +56,18 @@ export function completePartialTokens(
   const protect = (value: string): string =>
     `\u0000llmph${protectedSpans.push(value) - 1}\u0000`;
 
-  // Protect complete fenced code blocks and complete inline code spans so their
-  // contents are never mistaken for markdown/LaTeX markers. Double-backtick
-  // spans are protected before single-backtick ones so a span that itself
-  // contains a backtick (`` a`b ``) is not mangled by the single-backtick pass.
+  // Protect complete fenced code blocks first (they may span several lines), so
+  // their contents are never mistaken for markdown/LaTeX markers and the inline
+  // scanner below does not see their backticks.
   let working = text.replace(/```[\s\S]*?```/g, (match) => protect(match));
-  working = working.replace(/``[\s\S]*?``/g, (match) => protect(match));
-  working = working.replace(/`[^`\n]+`/g, (match) => protect(match));
 
-  // A leftover single backtick starts an unterminated inline code span. Protect
-  // the rest of the line and close it so the in-progress code renders cleanly.
-  const lastBacktick = working.lastIndexOf("`");
-  if (lastBacktick !== -1) {
-    // Bound the in-progress span to its own line so trailing markdown on later
-    // lines is not swallowed into the protected code.
-    const newline = working.indexOf("\n", lastBacktick);
-    const end = newline === -1 ? working.length : newline;
-    const span = working.slice(lastBacktick, end);
-    working =
-      working.slice(0, lastBacktick) +
-      protect(`${span}\``) +
-      working.slice(end);
-  }
+  // Then handle inline code spans with proper CommonMark backtick-run matching:
+  // a span opened by a run of N backticks is closed by the next run of exactly N
+  // backticks (runs of a different width in between are literal content). This
+  // correctly handles widths > 1, e.g. `` a`b ``. A trailing, still-unterminated
+  // opener is the in-progress span; it is closed (so the code renders cleanly)
+  // or hidden while it is still the very last thing streamed.
+  working = protectInlineCode(working, protect);
 
   working = repairIncompleteMath(working, showUnfinishedLatexBlocks);
   working = hideIncompleteLink(working);
@@ -85,10 +75,102 @@ export function completePartialTokens(
   working = hideDanglingListMarker(working);
   working = closeUnbalancedEmphasis(working);
 
-  return working.replace(
-    /\u0000llmph(\d+)\u0000/g,
-    (_match, index: string) => protectedSpans[Number(index)] ?? "",
-  );
+  // Restore protected spans. Repeat until no placeholder remains so a span that
+  // happens to wrap an earlier placeholder is never left half-restored (which
+  // would leak raw `\u0000llmph1\u0000` junk). Restored source text never
+  // reintroduces the null-delimited marker, so this terminates; the no-progress
+  // break is a belt-and-braces guard against a malformed marker.
+  while (working.includes("\u0000llmph")) {
+    const restored = working.replace(
+      /\u0000llmph(\d+)\u0000/g,
+      (_match, index: string) => protectedSpans[Number(index)] ?? "",
+    );
+    if (restored === working) break;
+    working = restored;
+  }
+  return working;
+}
+
+/**
+ * Protects inline code spans, replacing each with an opaque placeholder so its
+ * contents are not treated as markdown/LaTeX. Uses CommonMark backtick-run
+ * matching: a span opened by a run of N backticks closes at the next run of
+ * exactly N backticks; runs of any other width in between are literal content.
+ *
+ * The final, still-open backtick run (if any) is the in-progress span at the
+ * tail of the stream. It is bounded to its own line (so later markdown is not
+ * swallowed) and then:
+ *  - hidden, while the opener is the very last thing on the line with nothing
+ *    after it yet (the run may still be growing, e.g. `` ` `` → `` `` ``), so no
+ *    raw backticks flash; otherwise
+ *  - closed with a run matching the opener width, extending any partial closing
+ *    run already streamed (so `` `` ` `` becomes `` `` ` `` ``).
+ */
+function protectInlineCode(
+  text: string,
+  protect: (value: string) => string,
+): string {
+  let result = "";
+  let i = 0;
+  const n = text.length;
+
+  while (i < n) {
+    if (text[i] !== "`") {
+      result += text[i];
+      i++;
+      continue;
+    }
+
+    // Measure the opening backtick run.
+    let openEnd = i;
+    while (openEnd < n && text[openEnd] === "`") openEnd++;
+    const width = openEnd - i;
+
+    // Look for a closing run of exactly `width` backticks on the same line.
+    const lineEnd = text.indexOf("\n", openEnd);
+    const limit = lineEnd === -1 ? n : lineEnd;
+    let closeStart = -1;
+    let scan = openEnd;
+    while (scan < limit) {
+      if (text[scan] !== "`") {
+        scan++;
+        continue;
+      }
+      let runEnd = scan;
+      while (runEnd < limit && text[runEnd] === "`") runEnd++;
+      if (runEnd - scan === width) {
+        closeStart = scan;
+        scan = runEnd;
+        break;
+      }
+      scan = runEnd;
+    }
+
+    if (closeStart !== -1) {
+      // Complete span: protect it verbatim.
+      result += protect(text.slice(i, scan));
+      i = scan;
+      continue;
+    }
+
+    // Unterminated opener: this is the in-progress span at the tail.
+    const lineTail = text.slice(i, limit);
+    const hasContent = lineTail.length > width;
+    if (!hasContent) {
+      // Bare opener with nothing after it yet — hide it so no raw backticks show
+      // while the run may still be growing.
+      i = limit;
+      continue;
+    }
+    // Close it, extending any partial closing run already at the line's end.
+    let trailing = lineTail.length;
+    while (trailing > 0 && lineTail[trailing - 1] === "`") trailing--;
+    const need = Math.max(0, width - (lineTail.length - trailing));
+    result += protect(lineTail + "`".repeat(need));
+    i = limit;
+  }
+
+  return result;
 }
 
 /**

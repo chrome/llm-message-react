@@ -3,7 +3,7 @@
  * {@link preprocessLaTeX} and {@link escapeBrackets} so both functions treat
  * code identically; composed into the larger patterns below via `.source`.
  */
-const CODE_SPAN = /```[\s\S]*?```|`[^`\n]+`/;
+const CODE_SPAN = /```[\s\S]*?```|``[^\n]*?``|`[^`\n]+`/;
 
 /**
  * Preprocesses LaTeX content by replacing delimiters and escaping certain characters.

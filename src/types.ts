@@ -59,6 +59,7 @@ export interface ElementProps {
 /** Props passed to a custom anchor renderer. */
 export interface AnchorProps extends ElementProps {
   href?: string;
+  title?: string;
 }
 
 /** Props passed to a custom image renderer. */

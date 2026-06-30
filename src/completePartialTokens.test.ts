@@ -178,6 +178,24 @@ describe("completePartialTokens", () => {
         "a `code`\n**bold**",
       );
     });
+
+    it("does not leak a placeholder when a double-backtick span is mid-stream", () => {
+      // The leftover-backtick fallback can wrap a region that already holds an
+      // earlier placeholder; restoration must unwrap the nested marker rather
+      // than leave raw `\u0000llmph0\u0000` junk in the output.
+      const out = completePartialTokens("raw `**`, `` `");
+      expect(out).not.toContain("llmph");
+      expect(out).not.toContain("\u0000");
+      expect(out).toBe("raw `**`, `` ``");
+    });
+
+    it("hides a bare double-backtick opener but closes it once content follows", () => {
+      // Nothing after the opener yet: the run may still be growing, so hide it.
+      expect(completePartialTokens("abc ``")).toBe("abc ");
+      // Content has started (even a space): close with a matching 2-wide fence.
+      expect(completePartialTokens("abc `` ")).toBe("abc `` ``");
+      expect(completePartialTokens("abc `` ` ")).toBe("abc `` ` ``");
+    });
   });
 
   describe("code fences", () => {
