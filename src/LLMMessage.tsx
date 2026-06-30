@@ -148,17 +148,25 @@ function buildComponents(
         </div>
       );
     },
-    th({ children }) {
+    th({ children, style }) {
       if (o.th) {
         return <o.th className={cn.th}>{children}</o.th>;
       }
-      return <th className={cx("llm-th", cn.th)}>{children}</th>;
+      return (
+        <th className={cx("llm-th", cn.th)} style={style}>
+          {children}
+        </th>
+      );
     },
-    td({ children }) {
+    td({ children, style }) {
       if (o.td) {
         return <o.td className={cn.td}>{children}</o.td>;
       }
-      return <td className={cx("llm-td", cn.td)}>{children}</td>;
+      return (
+        <td className={cx("llm-td", cn.td)} style={style}>
+          {children}
+        </td>
+      );
     },
     blockquote({ children }) {
       if (o.blockquote) {
@@ -258,10 +266,10 @@ function buildComponents(
         />
       );
     },
-    a({ href, children }) {
+    a({ href, title, children }) {
       if (o.a) {
         return (
-          <o.a href={href} className={cn.a}>
+          <o.a href={href} title={title} className={cn.a}>
             {children}
           </o.a>
         );
@@ -269,6 +277,7 @@ function buildComponents(
       return (
         <a
           href={href}
+          title={title}
           target="_blank"
           rel="noopener noreferrer"
           className={cx("llm-a", cn.a)}

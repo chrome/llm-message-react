@@ -29,6 +29,11 @@ describe("escapeBrackets", () => {
     expect(escapeBrackets(input)).toBe(input);
   });
 
+  it("leaves a double-backtick code span untouched", () => {
+    const input = "raw `` ` `` and `\\(x\\)`";
+    expect(escapeBrackets(input)).toBe(input);
+  });
+
   it("returns text without brackets unchanged", () => {
     expect(escapeBrackets("plain text")).toBe("plain text");
   });
@@ -66,6 +71,11 @@ describe("preprocessLaTeX", () => {
   it("does not touch currency inside code blocks", () => {
     const input = "`price = $5`";
     expect(preprocessLaTeX(input)).toBe("`price = $5`");
+  });
+
+  it("does not corrupt a double-backtick span containing a backtick", () => {
+    const input = "see raw `**`, `` ` ``, or `$` here";
+    expect(preprocessLaTeX(input)).toBe(input);
   });
 
   it("does not touch currency inside fenced code blocks", () => {
