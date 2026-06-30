@@ -246,12 +246,16 @@
   padding: 0.625rem 0.75rem;
   font-weight: 500;
   color: color-mix(in oklch, var(--llm-foreground) 90%, transparent);
+  overflow-wrap: normal;
+  word-break: normal;
 }
 .llm-td {
   border-bottom: 1px solid
     color-mix(in oklch, var(--llm-border) 50%, transparent);
   padding: 0.625rem 0.75rem;
   vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* Links */

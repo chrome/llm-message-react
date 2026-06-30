@@ -3,11 +3,12 @@ import katex from "katex";
 /** Options controlling how {@link completePartialTokens} repairs the stream. */
 export interface CompletePartialTokensOptions {
   /**
-   * Progressively render unterminated *block* math (`\[…`, `$$…`) by closing
-   * the open constructs and keeping the largest prefix KaTeX accepts. This is
-   * convenient (a long block reveals row by row) but costs a synchronous KaTeX
-   * parse on every chunk while the block streams. Set to `false` to instead
-   * hide the block entirely until its closing delimiter arrives, skipping the
+   * Progressively render unterminated math by closing the open constructs and
+   * keeping the largest prefix KaTeX accepts. This applies to both *block* math
+   * (`\[…`, `$$…`, revealed row by row) and *inline* math (`$…`, `\(…`, closed
+   * in place). It is convenient but costs a synchronous KaTeX parse on every
+   * chunk while the math streams. Set to `false` to instead hide the
+   * unterminated math entirely until its closing delimiter arrives, skipping the
    * KaTeX work. Defaults to `true`.
    */
   showUnfinishedLatexBlocks?: boolean;
@@ -237,11 +238,14 @@ interface OpenMath {
 /**
  * Repairs an unterminated LaTeX region at the tail of the stream.
  *
- * Inline math (`$…`, `\(…`) is short, so it is simply hidden until it finishes
- * streaming. Block math (`\[…`, `$$…`) is instead rendered progressively: we
- * close any open environments/braces and keep the largest leading slice that
- * KaTeX can parse, so a multi-line block reveals itself as it streams instead
- * of staying blank until the closing delimiter finally arrives.
+ * Both inline math (`$…`, `\(…`) and block math (`\[…`, `$$…`) are rendered
+ * progressively: we close any open environments/braces and keep the largest
+ * leading slice that KaTeX can parse, so the math reveals itself as it streams
+ * instead of staying blank until the closing delimiter finally arrives. Inline
+ * math additionally drops an incomplete trailing brace group (e.g. `\text{ kc`)
+ * rather than auto-closing it, so a half-streamed word does not flash in the
+ * middle of running text. Set `showUnfinishedLatexBlocks` to `false` to instead
+ * hide the unterminated math entirely until its closing delimiter arrives.
  */
 function repairIncompleteMath(
   text: string,
@@ -268,7 +272,7 @@ function repairIncompleteMath(
     opens.push({
       index: text.lastIndexOf("\\("),
       open: "\\(",
-      close: "",
+      close: "\\)",
       block: false,
       display: false,
     });
@@ -289,7 +293,7 @@ function repairIncompleteMath(
     let masked = text.replace(/\$\$/g, "  ");
     // Also mask complete single-line "$…$" spans that contain a LaTeX command
     // (so they are real math, not "$5" currency). Their opening "$" may be
-    // followed by a digit (e.g. "$15 \text{ г}$"), which the currency guard
+    // followed by a digit (e.g. "$15 \text{ g}$"), which the currency guard
     // below would otherwise drop from the count while still counting the
     // closing "$", flipping the parity and hiding trailing content by mistake.
     masked = masked.replace(
@@ -306,16 +310,12 @@ function repairIncompleteMath(
       /(?<!\\)\$(?!\$)\d[\d\s.,+\-*/=]*\$/g,
       (m) => " ".repeat(m.length),
     );
-    let lastDollar = -1;
-    for (const match of masked.matchAll(/(?<!\\)\$(?!\d)/g)) {
-      lastDollar = match.index;
-    }
-    const singles = masked.match(/(?<!\\)\$(?!\d)/g) ?? [];
-    if (singles.length % 2 === 1 && lastDollar !== -1) {
+    const dollars = inlineMathDollarIndices(masked);
+    if (dollars.length % 2 === 1) {
       opens.push({
-        index: lastDollar,
+        index: dollars[dollars.length - 1],
         open: "$",
-        close: "",
+        close: "$",
         block: false,
         display: false,
       });
@@ -330,19 +330,14 @@ function repairIncompleteMath(
   const open = valid.reduce((a, b) => (b.index < a.index ? b : a));
   const before = text.slice(0, open.index);
 
-  if (!open.block) {
-    // Inline math is hidden until it finishes streaming.
-    return before;
-  }
-
-  // When progressive block rendering is disabled, hide the unterminated block
-  // until its closing delimiter arrives, skipping the KaTeX validation cost.
+  // When progressive rendering is disabled, hide the unterminated math (inline
+  // or block) until its closing delimiter arrives, skipping the KaTeX cost.
   if (!showUnfinishedLatexBlocks) {
     return before;
   }
 
   const inner = text.slice(open.index + open.open.length);
-  const body = bestRenderableMathBody(inner, open.display);
+  const body = bestRenderableMathBody(inner, open.display, open.block);
   if (body == null) return before;
 
   // Reproduce the original fenced layout so the markdown math parser can detect
@@ -360,6 +355,35 @@ function repairIncompleteMath(
 }
 
 /**
+ * Returns the indices of the unescaped single `$` characters that act as inline
+ * math delimiters in `masked` (complete `$$`/`$…$` spans are expected to have
+ * been blanked out by the caller already).
+ *
+ * A `$` directly followed by a digit is normally currency (`$5`) and ignored.
+ * The exception is a span whose body merely *starts* with a number but contains
+ * a LaTeX command, e.g. `$1288 \text{ kcal}`: the `\text` proves it is real
+ * math, so the opening `$` must count as a delimiter instead of being mistaken
+ * for `$1288` currency. The span is scanned only up to the next unescaped `$`,
+ * a newline, or the end of the string, since inline math stays on one line.
+ */
+function inlineMathDollarIndices(masked: string): number[] {
+  const indices: number[] = [];
+  const pattern = /(?<!\\)\$/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(masked)) != null) {
+    const index = match.index;
+    if (/\d/.test(masked[index + 1] ?? "")) {
+      const rest = masked.slice(index + 1);
+      const end = rest.search(/(?<!\\)\$|\n/);
+      const span = end === -1 ? rest : rest.slice(0, end);
+      if (!/\\[a-zA-Z]/.test(span)) continue;
+    }
+    indices.push(index);
+  }
+  return indices;
+}
+
+/**
  * Returns the largest leading slice of incomplete block-math content that KaTeX
  * can render, with its open environments and braces closed, or `null` when no
  * usable prefix exists yet (in which case the caller hides the fragment).
@@ -371,16 +395,50 @@ function repairIncompleteMath(
 function bestRenderableMathBody(
   inner: string,
   display: boolean,
+  block: boolean,
 ): string | null {
   const candidates = unclosedEnvironments(inner).length > 0
     ? [closeOpenMathConstructs(truncateToLastRow(inner)), closeOpenMathConstructs(trimIncompleteMathTail(inner))]
     : [closeOpenMathConstructs(trimIncompleteMathTail(inner))];
+
+  // Inline math is short and sits in running text, so a half-streamed brace
+  // group (e.g. `\text{ kc`) would flash a partial word that then changes. For
+  // inline math we therefore prefer dropping the incomplete trailing group and
+  // keeping the largest stable prefix, only falling back to the brace-closing
+  // candidates above when that prefix cannot render on its own.
+  if (!block) {
+    candidates.unshift(
+      closeOpenMathConstructs(
+        trimIncompleteMathTail(dropIncompleteBraceGroup(inner)),
+      ),
+    );
+  }
 
   for (const candidate of candidates) {
     if (!hasRenderableMathContent(candidate)) continue;
     if (isRenderableMath(candidate, display)) return candidate;
   }
   return null;
+}
+
+/**
+ * Cuts a math fragment back to just before its first still-open `{`, dropping
+ * the entire incomplete brace group. Escaped braces (`\{`, `\}`) are ignored.
+ * Returns the input unchanged when every group is already balanced.
+ */
+function dropIncompleteBraceGroup(text: string): string {
+  const stack: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\\") {
+      i++;
+      continue;
+    }
+    if (char === "{") stack.push(i);
+    else if (char === "}" && stack.length > 0) stack.pop();
+  }
+  if (stack.length === 0) return text;
+  return text.slice(0, stack[0]);
 }
 
 /** True when a math body contains something other than empty environment scaffolding. */
@@ -574,13 +632,29 @@ function closeDoubleUnderscore(text: string): string {
 }
 
 /**
+ * Blanks out asterisks that belong to *block* constructs rather than inline
+ * emphasis so they never skew the emphasis parity count: thematic breaks
+ * (`***`, `* * *`) and line-leading list bullets (`*   item`) at any
+ * indentation. Each match is replaced with spaces of equal length so string
+ * indices stay stable for the callers that still use the original text.
+ */
+function maskBlockAsterisks(text: string): string {
+  return text
+    .replace(/^[ \t]*\*(?:[ \t]*\*){2,}[ \t]*$/gm, (m) => " ".repeat(m.length))
+    .replace(/^[ \t]*\*(?=[ \t])/gm, (m) => " ".repeat(m.length));
+}
+
+/**
  * Closes a two-character emphasis marker (`**` or `~~`) when it is unbalanced
  * and the final marker looks like an opener (immediately followed by a
  * non-space character), which avoids touching list markers or operators.
  */
 function closeRunMarker(text: string, marker: string): string {
   const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const count = (text.match(new RegExp(escaped, "g")) ?? []).length;
+  // Asterisk runs share their character with bullets and thematic breaks, so
+  // count them on a text whose block asterisks have been masked away.
+  const countSource = marker.includes("*") ? maskBlockAsterisks(text) : text;
+  const count = (countSource.match(new RegExp(escaped, "g")) ?? []).length;
   if (count % 2 === 0) return text;
 
   const lastIndex = text.lastIndexOf(marker);
@@ -596,7 +670,10 @@ function closeRunMarker(text: string, marker: string): string {
  * bullet markers (`* item`) and multiplication (`2 * 3`) are left alone.
  */
 function closeSingleAsterisk(text: string): string {
-  const masked = text.replace(/\*\*/g, "");
+  // Mask block-level asterisks (bullets, thematic breaks) and "**" pairs so the
+  // marker is not miscounted as a dangling italic opener. Masking only affects
+  // the parity count; `lastIndexOf` still operates on the original text.
+  const masked = maskBlockAsterisks(text).replace(/\*\*/g, "");
   const count = (masked.match(/\*/g) ?? []).length;
   if (count % 2 === 0) return text;
 

@@ -35,6 +35,16 @@ describe("completePartialTokens", () => {
       expect(completePartialTokens("* item")).toBe("* item");
     });
 
+    it("closes bold inside a list item without the bullet skewing parity", () => {
+      expect(completePartialTokens("* **Bold item")).toBe("* **Bold item**");
+    });
+
+    it("closes bold in a list item when a thematic break precedes it", () => {
+      expect(completePartialTokens("***\n\n*   **Bold item")).toBe(
+        "***\n\n*   **Bold item**",
+      );
+    });
+
     it("does not treat multiplication as emphasis", () => {
       expect(completePartialTokens("2 * 3")).toBe("2 * 3");
     });
@@ -207,12 +217,26 @@ describe("completePartialTokens", () => {
   });
 
   describe("math", () => {
-    it("hides incomplete inline math with $", () => {
-      expect(completePartialTokens("equation $E = mc^2")).toBe("equation ");
+    it("progressively closes incomplete inline math with $", () => {
+      expect(completePartialTokens("equation $E = mc^2")).toBe(
+        "equation $E = mc^2$",
+      );
     });
 
-    it("hides incomplete \\( inline math", () => {
-      expect(completePartialTokens("see \\(a + b")).toBe("see ");
+    it("progressively closes incomplete \\( inline math", () => {
+      expect(completePartialTokens("see \\(a + b")).toBe("see \\(a + b\\)");
+    });
+
+    it("closes a complete-bodied inline span and appends $", () => {
+      expect(completePartialTokens("$\\approx 152 \\text{ kcal}")).toBe(
+        "$\\approx 152 \\text{ kcal}$",
+      );
+    });
+
+    it("drops an incomplete trailing brace group in inline math", () => {
+      expect(completePartialTokens("$\\approx 152 \\text{ kc")).toBe(
+        "$\\approx 152$",
+      );
     });
 
     it("keeps complete inline math", () => {
@@ -225,6 +249,23 @@ describe("completePartialTokens", () => {
 
     it("does not treat currency as math", () => {
       expect(completePartialTokens("It costs $5")).toBe("It costs $5");
+    });
+
+    it("treats a digit-leading inline span with a command as math, not currency", () => {
+      expect(completePartialTokens("**Kcal:** $1288 \\text{ kcal}")).toBe(
+        "**Kcal:** $1288 \\text{ kcal}$",
+      );
+    });
+
+    it("keeps a completed digit-leading inline span with a command intact", () => {
+      const input = "**Kcal:** $1288 \\text{ kcal} / 3 \\approx \\mathbf{430}$ kcal";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
+    it("still treats a digit-leading span without a command as currency", () => {
+      expect(completePartialTokens("It costs $1288 dollars")).toBe(
+        "It costs $1288 dollars",
+      );
     });
 
     it("keeps complete inline math whose content begins with a digit", () => {
@@ -243,13 +284,13 @@ describe("completePartialTokens", () => {
     });
 
     it("does not hide trailing text after a balanced numeric span", () => {
-      const input = "Углеводы: $0$ г\nи дальше ещё текст.";
+      const input = "Carbs: $0$ g\nand more text after.";
       expect(completePartialTokens(input)).toBe(input);
     });
 
     it("keeps an odd number of command-free numeric spans intact", () => {
       const input =
-        "**Белки:** $0$ г\n**Жиры:** $\\mathbf{15}$ г\n**Углеводы:** $0$ г\n**Ккал:** $\\mathbf{135}$ ккал\nИтог.";
+        "**Protein:** $0$ g\n**Fat:** $\\mathbf{15}$ g\n**Carbs:** $0$ g\n**Kcal:** $\\mathbf{135}$ kcal\nTotal.";
       expect(completePartialTokens(input)).toBe(input);
     });
   });
@@ -321,6 +362,22 @@ describe("completePartialTokens", () => {
           showUnfinishedLatexBlocks: false,
         }),
       ).toBe("\\[a + b\\]");
+    });
+
+    it("hides unfinished inline $ math when progressive rendering is off", () => {
+      expect(
+        completePartialTokens("equation $E = mc^2", {
+          showUnfinishedLatexBlocks: false,
+        }),
+      ).toBe("equation ");
+    });
+
+    it("hides unfinished inline \\( math when progressive rendering is off", () => {
+      expect(
+        completePartialTokens("see \\(a + b", {
+          showUnfinishedLatexBlocks: false,
+        }),
+      ).toBe("see ");
     });
   });
 });

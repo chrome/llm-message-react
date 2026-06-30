@@ -28,10 +28,10 @@ export function preprocessLaTeX(content: string): string {
   // `$` that legitimately belongs to a math expression (e.g. `$$x = $5$$`).
   //
   // Single-dollar inline math whose content begins with a digit (e.g.
-  // `$15 \text{ г}$`) is protected too: without this its opening `$` would be
+  // `$15 \text{ g}$`) is protected too: without this its opening `$` would be
   // escaped as currency in Step 3, unbalancing the delimiters so remark-math
   // swallows the rest of the paragraph as one math region. Two shapes qualify:
-  //   1. spans containing a LaTeX command (`\…`), e.g. `$15 \text{ г}$`;
+  //   1. spans containing a LaTeX command (`\…`), e.g. `$15 \text{ g}$`;
   //   2. balanced spans whose content is purely numeric/math (digits, spaces
   //      and basic operators, no prose letters), e.g. `$0$` or `$1288 / 3$`.
   // Both leave plain currency prose like `$5 and $10` for Step 3, because that
