@@ -236,6 +236,163 @@ describe("LLMMessage", () => {
     });
   });
 
+  describe("smooth rendering", () => {
+    it("does not wrap text in fade spans by default", () => {
+      const { container } = render(<LLMMessage>Hello world</LLMMessage>);
+      expect(container.querySelector(".llm-char")).not.toBeInTheDocument();
+      expect(container).toHaveTextContent("Hello world");
+    });
+
+    it("wraps prose characters in indexed fade spans when enabled", () => {
+      const { container } = render(<LLMMessage smoothReveal>Hi</LLMMessage>);
+      const spans = container.querySelectorAll<HTMLElement>(".llm-char");
+      expect(spans).toHaveLength(2);
+      expect(spans[0]).toHaveClass("llm-char");
+      expect(spans[0]).toHaveTextContent("H");
+      expect(spans[1]).toHaveTextContent("i");
+      // Each span carries its document-order index for the CSS reveal wave.
+      expect(spans[0].style.getPropertyValue("--i")).toBe("0");
+      expect(spans[1].style.getPropertyValue("--i")).toBe("1");
+      // The paragraph still reads as the original text.
+      expect(container).toHaveTextContent("Hi");
+    });
+
+    it("keeps reveal indices stable as more text streams in", () => {
+      const { container, rerender } = render(
+        <LLMMessage smoothReveal>ab</LLMMessage>,
+      );
+      const readIndices = () =>
+        Array.from(container.querySelectorAll<HTMLElement>(".llm-char")).map(
+          (el) => [el.textContent, el.style.getPropertyValue("--i")] as const,
+        );
+
+      const before = readIndices();
+      expect(before).toEqual([
+        ["a", "0"],
+        ["b", "1"],
+      ]);
+
+      rerender(<LLMMessage smoothReveal>abcd</LLMMessage>);
+
+      const after = readIndices();
+      // The original characters keep their indices; the new tail continues the
+      // same monotonic sequence so it joins the same reveal wave.
+      expect(after).toEqual([
+        ["a", "0"],
+        ["b", "1"],
+        ["c", "2"],
+        ["d", "3"],
+      ]);
+    });
+
+    it("reveals instantly without animating when the content shrinks", () => {
+      const { container, rerender } = render(
+        <LLMMessage smoothReveal>abcdef</LLMMessage>,
+      );
+      // Growing content animates: characters are wrapped in fade spans.
+      expect(container.querySelectorAll(".llm-char").length).toBeGreaterThan(0);
+
+      // Shrinking (e.g. scrubbing backwards) is not newly-streamed content, so
+      // it is shown as plain markup with no per-character fade spans.
+      rerender(<LLMMessage smoothReveal>abc</LLMMessage>);
+      expect(container.querySelector(".llm-char")).not.toBeInTheDocument();
+      expect(container).toHaveTextContent("abc");
+    });
+
+    it("fades a fenced code block in as a single unit, not per character", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"```js\nconst a = 1;\n```"}</LLMMessage>,
+      );
+      const block = container.querySelector<HTMLElement>(".llm-fade-block");
+      expect(block).toBeInTheDocument();
+      expect(block?.querySelector(".llm-code-block")).toBeInTheDocument();
+      // The code text itself is not split into fade spans.
+      expect(block?.querySelector(".llm-char")).not.toBeInTheDocument();
+      expect(block?.style.getPropertyValue("--i")).toBe("0");
+    });
+
+    it("exposes the reveal ramp custom property on the root", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>hi</LLMMessage>,
+      );
+      const root = container.querySelector<HTMLElement>(".llm-message");
+      expect(root?.style.getPropertyValue("--llm-ramp")).not.toBe("");
+    });
+
+    it("fades a blockquote's decoration with the wave", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"> hi"}</LLMMessage>,
+      );
+      const quote = container.querySelector<HTMLElement>(".llm-blockquote");
+      expect(quote).toHaveClass("llm-fade");
+      expect(quote?.style.getPropertyValue("--i")).toBe("0");
+    });
+
+    it("fades list-item decoration with the wave", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"- one\n- two"}</LLMMessage>,
+      );
+      const items = container.querySelectorAll<HTMLElement>(".llm-li");
+      expect(items.length).toBeGreaterThan(0);
+      items.forEach((item) => {
+        expect(item).toHaveClass("llm-fade");
+        expect(item.style.getPropertyValue("--i")).not.toBe("");
+      });
+    });
+
+    it("does not wrap structural whitespace between list items", () => {
+      // The newline text nodes a list places between its <li>s must stay plain
+      // text. Wrapping them in a <span> turns them into real flex items that add
+      // a phantom `gap`, making the list taller while animating (then snapping
+      // back on commit). A list container should only ever hold <li> elements.
+      const { container } = render(
+        <LLMMessage smoothReveal>{"- one\n- two\n- three"}</LLMMessage>,
+      );
+      const list = container.querySelector<HTMLElement>(".llm-ul");
+      expect(list).toBeInTheDocument();
+      const strayChars = Array.from(list?.children ?? []).filter(
+        (child) => !(child instanceof HTMLLIElement),
+      );
+      expect(strayChars).toHaveLength(0);
+    });
+
+    it("fades the inline-code background with the wave", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"use `x` here"}</LLMMessage>,
+      );
+      const code = container.querySelector<HTMLElement>("code.llm-code");
+      expect(code).toHaveClass("llm-fade");
+      expect(code?.style.getPropertyValue("--i")).not.toBe("");
+    });
+
+    it("snaps block math in instead of fading it", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>
+          {"$$\nx = 1\n$$"}
+        </LLMMessage>,
+      );
+      const block = container.querySelector<HTMLElement>(".llm-fade-block-snap");
+      expect(block).toBeInTheDocument();
+      expect(block?.querySelector(".katex-display")).toBeInTheDocument();
+      expect(block?.style.getPropertyValue("--i")).not.toBe("");
+    });
+
+    it("fades a thematic break as a single unit", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"a\n\n---\n\nb"}</LLMMessage>,
+      );
+      const block = container.querySelector(".llm-fade-block");
+      expect(block?.querySelector("hr")).toBeInTheDocument();
+    });
+
+    it("leaves decorations untouched when smoothReveal is off", () => {
+      const { container } = render(<LLMMessage>{"> hi"}</LLMMessage>);
+      const quote = container.querySelector<HTMLElement>(".llm-blockquote");
+      expect(quote).not.toHaveClass("llm-fade");
+      expect(quote?.style.getPropertyValue("--i")).toBe("");
+    });
+  });
+
   describe("overrides", () => {
     it("uses a custom paragraph component", () => {
       const P = ({ children }: { children?: React.ReactNode }) => (

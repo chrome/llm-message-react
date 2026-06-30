@@ -44,6 +44,45 @@
   margin-bottom: 0;
 }
 
+/* Smooth streaming reveal (opt-in via the `smoothReveal` prop). Newly
+ * streamed characters are wrapped in `.llm-char` spans, and complex blocks
+ * (code, math, tables, images) in a `.llm-fade-block`, each tagged with its
+ * document-order index `--i`. The component advances a single `--llm-reveal`
+ * position over time; each unit's opacity is a pure function of how far the
+ * reveal has swept past it, fading over `--llm-ramp` units. Because opacity
+ * only depends on state (never on mount time), the wave is flicker-free and a
+ * new chunk simply extends the wave the leftover is already part of. */
+.llm-char,
+.llm-fade-block,
+.llm-fade {
+  opacity: clamp(
+    0,
+    calc((var(--llm-reveal, 0) - var(--i, 0)) / var(--llm-ramp, 6)),
+    1
+  );
+}
+.llm-fade-block {
+  display: block;
+}
+.llm-fade-block-inline {
+  display: inline-block;
+  vertical-align: baseline;
+}
+/* Block math renders all-or-nothing, so it snaps to visible the instant the
+ * wave reaches it instead of fading (a fade just looks like a flash). The steep
+ * multiplier turns the reveal/index relationship into a step function. */
+.llm-fade-block-snap {
+  opacity: clamp(0, calc((var(--llm-reveal, 0) - var(--i, 0)) * 1000), 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .llm-char,
+  .llm-fade-block,
+  .llm-fade-block-snap,
+  .llm-fade {
+    opacity: 1;
+  }
+}
+
 /* Paragraphs */
 .llm-p {
   margin: 1rem 0;

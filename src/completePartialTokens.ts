@@ -250,16 +250,41 @@ function buildDelimiterRow(fragment: string, columns: number): string {
  * a line like "Unordered list:" would flash as a heading until "- Item" streams
  * in. We drop the dangling marker until it gains content. A blank line above the
  * dashes makes them a thematic break instead, which is left untouched.
+ *
+ * The dash that opens a *nested* item is indented past the parent's marker, so
+ * the underline is judged relative to the previous line's list context: a top
+ * level paragraph treats a dash indented 0-3 spaces as a setext underline,
+ * while under a list item the same range is measured from the item's own
+ * content column (e.g. a third-level dash indented four spaces). A dash beyond
+ * that range is an indented code line, not a heading, and is left untouched.
  */
 function hideDanglingListMarker(text: string): string {
-  const match = text.match(/\n[ \t]{0,3}-+[ \t]*$/);
+  const match = text.match(/\n([ \t]*)-+[ \t]*$/);
   if (match?.index == null) return text;
 
   const before = text.slice(0, match.index);
   const prevLine = before.slice(before.lastIndexOf("\n") + 1);
   if (prevLine.trim() === "") return text;
 
-  return before;
+  const dashIndent = indentWidth(match[1]);
+
+  // A setext underline may be indented up to three spaces past the column where
+  // the paragraph it underlines begins. For a list item that column is the
+  // item's content (after its marker); for plain text it is column zero.
+  const listItem = prevLine.match(/^([ \t]*(?:[-*+]|\d+[.)])[ \t]+)/);
+  const baseIndent = listItem ? indentWidth(listItem[1]) : 0;
+  if (dashIndent <= baseIndent + 3) return before;
+
+  return text;
+}
+
+/** Visual width of leading whitespace, counting a tab as up to four columns. */
+function indentWidth(indent: string): number {
+  let width = 0;
+  for (const char of indent) {
+    width += char === "\t" ? 4 - (width % 4) : 1;
+  }
+  return width;
 }
 
 /**

@@ -115,6 +115,22 @@ describe("completePartialTokens", () => {
       );
     });
 
+    it("hides a dangling dash nested under a second-level item", () => {
+      expect(
+        completePartialTokens("- Item B\n  - Nested B.1\n  - Nested B.2\n    -"),
+      ).toBe("- Item B\n  - Nested B.1\n  - Nested B.2");
+    });
+
+    it("keeps a third-level item once it has content", () => {
+      const input = "- Item B\n  - Nested B.2\n    - Deep B.2.a";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
+    it("leaves a deeply indented dash that reads as code", () => {
+      const input = "paragraph\n\n    code\n        -";
+      expect(completePartialTokens(input)).toBe(input);
+    });
+
     it("keeps a thematic break separated by a blank line", () => {
       expect(completePartialTokens("Some text\n\n---")).toBe("Some text\n\n---");
     });
