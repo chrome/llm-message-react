@@ -112,17 +112,17 @@ describe("preprocessLaTeX", () => {
   });
 
   it("does not half-escape a balanced numeric single-dollar span", () => {
-    expect(preprocessLaTeX("Углеводы: $0$ г")).toBe("Углеводы: $0$ г");
+    expect(preprocessLaTeX("Carbs: $0$ g")).toBe("Carbs: $0$ g");
   });
 
   it("keeps numeric and command spans intact across lines", () => {
     const input =
-      "**Белки:** $0$ г\n**Жиры:** $\\mathbf{15}$ г\n**Углеводы:** $0$ г";
+      "**Protein:** $0$ g\n**Fat:** $\\mathbf{15}$ g\n**Carbs:** $0$ g";
     expect(preprocessLaTeX(input)).toBe(input);
   });
 
   it("protects a numeric span with operators", () => {
-    expect(preprocessLaTeX("$1288 / 3$ porции")).toBe("$1288 / 3$ porции");
+    expect(preprocessLaTeX("$1288 / 3$ portions")).toBe("$1288 / 3$ portions");
   });
 
   it("still escapes currency that is not a balanced math pair", () => {
