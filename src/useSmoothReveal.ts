@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, RefObject } from "react";
-import type { Options } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 
 import { createFadeRehypePlugin, type SmoothRevealState } from "./smoothReveal";
 
-type RehypePlugins = Options["rehypePlugins"];
+/** The rehype plugin produced by {@link createFadeRehypePlugin}. */
+type FadePlugin = ReturnType<typeof createFadeRehypePlugin>;
 
-const baseRehypePlugins: RehypePlugins = [rehypeKatex];
+// Run the wave synchronously after commit but before paint, so the
+// `--llm-reveal` variable is only ever written to a freshly-committed tree
+// (never to the previous, still-mounted tree during render). On the server
+// there is no layout to flush, so fall back to a passive effect to avoid the
+// React "useLayoutEffect does nothing on the server" warning.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Width of the smooth-reveal fade gradient, in reveal units (characters). A
 // larger value spreads each fade over more neighbouring characters for a softer
@@ -15,8 +20,18 @@ const baseRehypePlugins: RehypePlugins = [rehypeKatex];
 const SMOOTH_RAMP = 6;
 
 export interface UseSmoothRevealOptions {
-  /** The raw markdown source; growth of this string is what drives the wave. */
-  source: string;
+  /**
+   * The markdown source of the *active* (currently streaming) block; its growth
+   * is what drives the reveal wave. With block memoization this is the last
+   * block; without it, the whole message.
+   */
+  activeSource: string;
+  /**
+   * Identity of the active block (its index). When it changes a new block has
+   * started streaming, so the wave resets and animates the new block from its
+   * own start.
+   */
+  activeKey: number;
   /** Whether smooth rendering is enabled. */
   enabled: boolean;
   /** Reveal window for a freshly-arrived chunk, in milliseconds. */
@@ -26,26 +41,36 @@ export interface UseSmoothRevealOptions {
 export interface UseSmoothRevealResult {
   /** Attach to the rendered root element; the wave position is set on it. */
   rootRef: RefObject<HTMLDivElement | null>;
-  /** Rehype plugins to feed `react-markdown` (KaTeX, plus the fade plugin). */
-  rehypePlugins: RehypePlugins;
+  /**
+   * The smooth-reveal rehype plugin to attach to the active block, or `null`
+   * when smooth reveal is disabled. KaTeX is composed separately by the caller
+   * so it runs only on blocks that actually contain math.
+   */
+  fadePlugin: FadePlugin | null;
   /** Extra CSS custom properties to spread onto the root, or `undefined`. */
   revealStyle: CSSProperties | undefined;
 }
 
 /**
- * Drives the smooth character-by-character reveal.
+ * Drives the smooth character-by-character reveal of the active block.
  *
  * The opacity of every reveal unit is computed in CSS from its `--i` index and
- * a single `--llm-reveal` position. That position is a float in unit space that
- * only ever moves forward, so the reveal is monotonic and never flickers even
- * as `react-markdown` re-parses the growing source. A new chunk re-targets the
- * position and recomputes the speed from the *current* position, which merges
- * any unfinished leftover into the new chunk's wave over one fresh `duration`
- * window. Units the wave has already passed are committed to plain markup so
- * the live per-character DOM stays bounded to the active wave.
+ * a single `--llm-reveal` position on the root. That position is a float in unit
+ * space that only ever moves forward, so the reveal is monotonic and never
+ * flickers even as `react-markdown` re-parses the growing source. A new chunk
+ * re-targets the position and recomputes the speed from the *current* position,
+ * which merges any unfinished leftover into the new chunk's wave over one fresh
+ * `duration` window. Units the wave has already passed are committed to plain
+ * markup so the live per-character DOM stays bounded to the active wave.
+ *
+ * Only the active block carries the fade plugin, so its reveal indices are
+ * local to that block (they restart at 0). When the active block changes the
+ * wave resets so the new block animates from its own start, while the
+ * just-finished block flips to plain markup.
  */
 export function useSmoothReveal({
-  source,
+  activeSource,
+  activeKey,
   enabled,
   duration,
 }: UseSmoothRevealOptions): UseSmoothRevealResult {
@@ -58,6 +83,7 @@ export function useSmoothReveal({
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef(0);
   const prevSourceRef = useRef("");
+  const activeKeyRef = useRef(activeKey);
   const snapRef = useRef(false);
   const [, forceCommit] = useState(0);
 
@@ -65,45 +91,65 @@ export function useSmoothReveal({
     rootRef.current?.style.setProperty("--llm-reveal", String(value));
   };
 
+  // A new active block began streaming: reset the wave so the new block reveals
+  // from its own start (its reveal indices restart at 0) instead of being
+  // treated as a wholesale content replacement (which would snap it visible).
+  // Only refs are touched here; `--llm-reveal` is written from the layout effect
+  // after commit so a reset can never blank out the just-finished block's fade
+  // spans (which are still mounted until React commits the new tree).
+  if (enabled && activeKey !== activeKeyRef.current) {
+    activeKeyRef.current = activeKey;
+    positionRef.current = 0;
+    targetRef.current = 0;
+    velocityRef.current = 0;
+    revealStateRef.current.committedUnits = 0;
+    prevSourceRef.current = "";
+    snapRef.current = false;
+  }
+
   // Only genuine appends animate. When the content shrinks (e.g. scrubbing
   // backwards) or is replaced wholesale, there is no newly-streamed text, so we
   // reveal everything instantly with no animation: render every unit as plain
   // markup this pass and snap the wave to the end in the effect below. For an
   // append we just advance the committed boundary so units the wave has already
   // passed render as plain markup. Done during render so the plugin sees the
-  // correct state on this same pass; it is idempotent for a given `source`.
+  // correct state on this same pass; it is idempotent for a given source.
   if (enabled) {
-    const isAppend = source.startsWith(prevSourceRef.current);
+    const isAppend = activeSource.startsWith(prevSourceRef.current);
     if (isAppend) {
       const safe = Math.floor(positionRef.current) - SMOOTH_RAMP;
       if (safe > revealStateRef.current.committedUnits) {
         revealStateRef.current.committedUnits = safe;
       }
     } else {
+      // Content shrank or was replaced: render every unit as plain markup this
+      // pass (committed boundary past the end) so there are no fade spans, and
+      // let the layout effect snap `--llm-reveal` to the end after commit.
       snapRef.current = true;
       revealStateRef.current.committedUnits = Number.MAX_SAFE_INTEGER;
-      setRevealVar(Number.MAX_SAFE_INTEGER);
     }
-    prevSourceRef.current = source;
+    prevSourceRef.current = activeSource;
   }
 
-  const rehypePlugins = useMemo<RehypePlugins>(() => {
+  const fadePlugin = useMemo<FadePlugin | null>(() => {
     if (!enabled) {
-      return baseRehypePlugins;
+      return null;
     }
-    const fade = createFadeRehypePlugin({
+    return createFadeRehypePlugin({
       state: revealStateRef.current,
       onTotal: (total) => {
         totalRef.current = total;
       },
     });
-    return [rehypeKatex, fade];
   }, [enabled]);
 
-  // Drive `--llm-reveal` toward the end of the content. Re-runs on every chunk
-  // so the target/speed are recomputed from the *current* position, which is
-  // what merges any unfinished leftover into the new chunk's reveal wave.
-  useEffect(() => {
+  // Drive `--llm-reveal` toward the end of the active block. Runs after commit
+  // but before paint (layout effect) so the variable is written to the just
+  // committed tree, never to the previous one during render. Re-runs on every
+  // chunk (and when the active block changes) so the target/speed are
+  // recomputed from the *current* position, which is what merges any unfinished
+  // leftover into the new chunk's reveal wave.
+  useIsomorphicLayoutEffect(() => {
     if (!enabled) {
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
@@ -131,6 +177,12 @@ export function useSmoothReveal({
       }
       return;
     }
+
+    // Reflect the current wave position on the freshly-committed tree before the
+    // browser paints. After an active-block change the position was reset to 0,
+    // so this keeps the new block hidden (rather than flashing fully visible for
+    // one frame before the animation's first rAF tick lowers it).
+    setRevealVar(positionRef.current);
 
     // Reveal one ramp past the last unit so the final character reaches full
     // opacity rather than stopping mid-fade.
@@ -190,11 +242,11 @@ export function useSmoothReveal({
         rafRef.current = null;
       }
     };
-  }, [source, enabled, duration]);
+  }, [activeSource, activeKey, enabled, duration]);
 
   const revealStyle: CSSProperties | undefined = enabled
     ? ({ "--llm-ramp": String(SMOOTH_RAMP) } as CSSProperties)
     : undefined;
 
-  return { rootRef, rehypePlugins, revealStyle };
+  return { rootRef, fadePlugin, revealStyle };
 }

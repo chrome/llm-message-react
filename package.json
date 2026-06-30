@@ -76,6 +76,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "katex": "^0.16.22",
+    "marked": "^17.0.6",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",

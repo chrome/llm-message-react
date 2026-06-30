@@ -172,6 +172,16 @@ The reveal is purely visual: text is always in the DOM the moment it streams in,
 
 Opacity is computed purely from each character's position relative to the reveal point, so it only ever increases (no flicker) regardless of how the stream re-renders, and it is disabled automatically for users who prefer reduced motion.
 
+### Block memoization
+
+While a long message streams in, each new chunk would otherwise re-parse and re-render the entire message — re-running KaTeX and code highlighting over text that has not changed. By default `LLMMessage` splits the message into top-level markdown blocks (paragraphs, headings, code fences, math blocks, lists, tables, …) and memoizes each one, so only the last (currently growing) block re-renders on each chunk. Earlier blocks stay mounted and untouched, which keeps streaming smooth regardless of message length.
+
+This is on by default and needs no configuration. The one trade-off is that constructs which resolve across blocks — footnotes and link reference definitions — cannot be split (a definition in one block could not be seen by a reference in another). Those are detected automatically and kept in a single block, but if you render content that relies on them and want to be certain, disable splitting:
+
+```tsx
+<LLMMessage blockMemoization={false}>{content}</LLMMessage>
+```
+
 The repair function is also exported if you need it directly, alongside the LaTeX preprocessing helpers:
 
 ```ts
@@ -259,6 +269,7 @@ import { MyCheckbox, MyCodeBlock, MyLink } from "./ui";
 - `showUnfinishedLatexBlocks?: boolean` — progressively render unterminated block math while it streams (costs a synchronous KaTeX parse per chunk); set to `false` to hide unfinished blocks until they close and skip that work. Defaults to `true`. Only relevant while `completePartialTokens` is enabled.
 - `smoothReveal?: boolean` — fade newly-streamed text in (per character for prose, whole-unit for code/tables/images; block math snaps in instantly since it can't fade progressively) instead of popping it in. Purely visual and respects `prefers-reduced-motion`. Defaults to `false`.
 - `smoothRevealDuration?: number` — reveal window in milliseconds for each freshly-arrived chunk. Defaults to `300`. Only relevant while `smoothReveal` is enabled.
+- `blockMemoization?: boolean` — split the message into top-level blocks and memoize each so a streaming chunk only re-renders the last block (see [Block memoization](#block-memoization)). Defaults to `true`.
 - All other `div` props are spread onto the root element.
 
 > Pass stable references for `classNames`, `components`, and `highlighter` (define them outside render or memoize them). They are dependencies of an internal `useMemo`, so new object/identity on every render defeats it.
