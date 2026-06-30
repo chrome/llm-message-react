@@ -154,6 +154,24 @@ This convenience has a cost: it runs a synchronous KaTeX parse on every streamed
 <LLMMessage showUnfinishedLatexBlocks={false}>{content}</LLMMessage>
 ```
 
+### Smooth reveal
+
+By default new text pops in as each chunk arrives. Set `smoothReveal` to fade it in instead — character by character for prose, and as a single unit for complex blocks (code, tables, images, rules). Box decorations (a blockquote's border, list bullets, an inline-code background) fade in together with the content they belong to. Block math (`$$ … $$`, `\[ … \]`) is the one exception: KaTeX only produces output once the whole formula has streamed in, so a fade would just be a flash — instead the block appears instantly the moment the wave reaches it:
+
+```tsx
+<LLMMessage smoothReveal>{content}</LLMMessage>
+```
+
+The reveal is purely visual: text is always in the DOM the moment it streams in, it just eases up from transparent as a single travelling wave. The wave is sized so it sweeps through the not-yet-revealed text within a short window (`smoothRevealDuration`, default `300` ms). When a new chunk arrives while the previous one is still fading, the leftover (not-yet-revealed) characters and the new ones reveal together over one fresh window, so the animation stays a single coherent wave that keeps pace with the stream instead of many overlapping fades.
+
+```tsx
+<LLMMessage smoothReveal smoothRevealDuration={200}>
+  {content}
+</LLMMessage>
+```
+
+Opacity is computed purely from each character's position relative to the reveal point, so it only ever increases (no flicker) regardless of how the stream re-renders, and it is disabled automatically for users who prefer reduced motion.
+
 The repair function is also exported if you need it directly, alongside the LaTeX preprocessing helpers:
 
 ```ts
@@ -239,6 +257,8 @@ import { MyCheckbox, MyCodeBlock, MyLink } from "./ui";
 - `highlighter?: CodeHighlighter` — opt-in syntax highlighter for fenced code blocks (see [Syntax highlighting](#syntax-highlighting)). Omitted by default, so no highlighter bundle is pulled in.
 - `completePartialTokens?: boolean` — repair partially-streamed markdown/LaTeX. Defaults to `true`.
 - `showUnfinishedLatexBlocks?: boolean` — progressively render unterminated block math while it streams (costs a synchronous KaTeX parse per chunk); set to `false` to hide unfinished blocks until they close and skip that work. Defaults to `true`. Only relevant while `completePartialTokens` is enabled.
+- `smoothReveal?: boolean` — fade newly-streamed text in (per character for prose, whole-unit for code/tables/images; block math snaps in instantly since it can't fade progressively) instead of popping it in. Purely visual and respects `prefers-reduced-motion`. Defaults to `false`.
+- `smoothRevealDuration?: number` — reveal window in milliseconds for each freshly-arrived chunk. Defaults to `300`. Only relevant while `smoothReveal` is enabled.
 - All other `div` props are spread onto the root element.
 
 > Pass stable references for `classNames`, `components`, and `highlighter` (define them outside render or memoize them). They are dependencies of an internal `useMemo`, so new object/identity on every render defeats it.

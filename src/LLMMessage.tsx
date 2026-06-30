@@ -1,8 +1,7 @@
 import { clsx } from "clsx";
 import { useMemo } from "react";
-import type { HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
@@ -14,6 +13,7 @@ import type {
   LLMMessageClassNames,
   LLMMessageComponents,
 } from "./types";
+import { useSmoothReveal } from "./useSmoothReveal";
 
 export interface LLMMessageProps
   extends Omit<HTMLAttributes<HTMLDivElement>, "children" | "content"> {
@@ -43,6 +43,21 @@ export interface LLMMessageProps
    */
   showUnfinishedLatexBlocks?: boolean;
   /**
+   * Fade newly-streamed text in character-by-character (and complex blocks as a
+   * whole) instead of popping it in. Purely visual: text is always in the DOM
+   * immediately, it just eases from transparent. Respects
+   * `prefers-reduced-motion`. Defaults to `false`.
+   */
+  smoothReveal?: boolean;
+  /**
+   * The reveal window for a freshly-arrived chunk, in milliseconds. Each batch
+   * of new characters is staggered so it finishes within roughly this window;
+   * when a new chunk arrives mid-animation the leftover plus the new text reveal
+   * over a fresh window. Only relevant while `smoothReveal` is enabled.
+   * Defaults to `300`.
+   */
+  smoothRevealDuration?: number;
+  /**
    * Optional syntax highlighter for fenced code blocks. When omitted, code
    * blocks render as plain text (so no highlighter bundle is pulled in). Pass
    * `ShikiHighlighter` / `ShikiWebHighlighter`, or build your own with
@@ -52,7 +67,6 @@ export interface LLMMessageProps
 }
 
 const remarkPlugins = [remarkGfm, remarkMath];
-const rehypePlugins = [rehypeKatex];
 
 function cx(...inputs: Array<string | undefined>): string | undefined {
   const result = clsx(inputs);
@@ -168,12 +182,15 @@ function buildComponents(
         </td>
       );
     },
-    blockquote({ children }) {
+    blockquote({ children, className, style }) {
       if (o.blockquote) {
         return <o.blockquote className={cn.blockquote}>{children}</o.blockquote>;
       }
       return (
-        <blockquote className={cx("llm-blockquote", cn.blockquote)}>
+        <blockquote
+          className={cx("llm-blockquote", cn.blockquote, className)}
+          style={style}
+        >
           {children}
         </blockquote>
       );
@@ -190,11 +207,15 @@ function buildComponents(
       }
       return <ol className={cx("llm-ol", cn.ol)}>{children}</ol>;
     },
-    li({ children }) {
+    li({ children, className, style }) {
       if (o.li) {
         return <o.li className={cn.li}>{children}</o.li>;
       }
-      return <li className={cx("llm-li", cn.li)}>{children}</li>;
+      return (
+        <li className={cx("llm-li", cn.li, className)} style={style}>
+          {children}
+        </li>
+      );
     },
     p({ children }) {
       if (o.p) {
@@ -343,7 +364,10 @@ export function LLMMessage({
   components,
   completePartialTokens: repairPartialTokens = true,
   showUnfinishedLatexBlocks = true,
+  smoothReveal = false,
+  smoothRevealDuration = 300,
   highlighter,
+  style,
   ...rest
 }: LLMMessageProps) {
   const source = content ?? children ?? "";
@@ -360,8 +384,23 @@ export function LLMMessage({
     return preprocessLaTeX(repaired);
   }, [source, repairPartialTokens, showUnfinishedLatexBlocks]);
 
+  const { rootRef, rehypePlugins, revealStyle } = useSmoothReveal({
+    source,
+    enabled: smoothReveal,
+    duration: smoothRevealDuration,
+  });
+
+  const rootStyle: CSSProperties | undefined = revealStyle
+    ? { ...style, ...revealStyle }
+    : style;
+
   return (
-    <div className={cx("llm-message", classNames?.root, className)} {...rest}>
+    <div
+      ref={rootRef}
+      className={cx("llm-message", classNames?.root, className)}
+      style={rootStyle}
+      {...rest}
+    >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins}
