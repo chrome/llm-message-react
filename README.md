@@ -14,8 +14,6 @@ A single React component that renders LLM markdown output the way a polished cha
 npm install llm-message-react
 ```
 
-`react` and `react-dom` (>=18) are peer dependencies.
-
 ## Usage
 
 ```tsx
@@ -113,6 +111,38 @@ Notes:
 ## Streaming
 
 `LLMMessage` repairs partially-streamed markdown/LaTeX by default, so unterminated tokens (`**bold`, `` `code ``, `[label](http`, `$E = mc^2`, `\[ ... `) don't flash as raw delimiters while a response streams in. Disable it with `completePartialTokens={false}`.
+
+### Turn repair off once streaming is done
+
+The repair only helps _while_ text is still arriving. On a finished message it can do harm: a single trailing `$` (or a stray `\`) that is really part of the content gets read as the start of an unterminated math token and "completed", so a final string like `Pay $12\at the door` is mistaken for LaTeX and mangled.
+
+If you know when a message has finished streaming, gate `completePartialTokens` on that. Keep it `true` while streaming, then flip it to `false` once the stream closes so the final, complete text is rendered verbatim:
+
+```tsx
+import { useEffect, useState } from "react";
+import { LLMMessage } from "llm-message-react";
+import "llm-message-react/styles.css";
+
+export function StreamedMessage({ messageId }: { messageId: string }) {
+  const [content, setContent] = useState("");
+  const [isStreaming, setIsStreaming] = useState(true);
+
+  useEffect(() => {
+    const stream = subscribeToMessage(messageId, {
+      onToken: (token) => setContent((prev) => prev + token),
+      onDone: () => setIsStreaming(false), // stream finished
+    });
+    return () => stream.close();
+  }, [messageId]);
+
+  // Repair partial tokens while streaming, render verbatim once done.
+  return (
+    <LLMMessage completePartialTokens={isStreaming}>{content}</LLMMessage>
+  );
+}
+```
+
+This way half-streamed tokens are still repaired mid-stream, but the completed message is never "fixed" into something it isn't.
 
 ### Unfinished block math
 
