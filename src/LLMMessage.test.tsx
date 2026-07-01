@@ -292,11 +292,17 @@ describe("LLMMessage", () => {
       // Growing content animates: characters are wrapped in fade spans.
       expect(container.querySelectorAll(".llm-char").length).toBeGreaterThan(0);
 
+      const root = container.querySelector<HTMLElement>(".llm-message");
+      expect(root).toBeInTheDocument();
+      // Simulate a stale tall clip left over from an in-progress reveal.
+      root!.style.height = "500px";
+
       // Shrinking (e.g. scrubbing backwards) is not newly-streamed content, so
       // it is shown as plain markup with no per-character fade spans.
       rerender(<LLMMessage smoothReveal>abc</LLMMessage>);
       expect(container.querySelector(".llm-char")).not.toBeInTheDocument();
       expect(container).toHaveTextContent("abc");
+      expect(root!.style.height).not.toBe("500px");
     });
 
     it("fades a fenced code block in as a single unit, not per character", () => {
@@ -317,6 +323,7 @@ describe("LLMMessage", () => {
       );
       const root = container.querySelector<HTMLElement>(".llm-message");
       expect(root?.style.getPropertyValue("--llm-ramp")).not.toBe("");
+      expect(root).toHaveClass("llm-smooth-reveal");
     });
 
     it("fades a blockquote's decoration with the wave", () => {
@@ -445,6 +452,38 @@ describe("LLMMessage", () => {
       expect(paragraphs[0].querySelector(".llm-char")).not.toBeInTheDocument();
       // The active block fades its characters in.
       expect(paragraphs[1].querySelector(".llm-char")).toBeInTheDocument();
+    });
+
+    it("groups RTL script text into word fade units instead of per-character spans", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"שלום עולם"}</LLMMessage>,
+      );
+      const spans = container.querySelectorAll<HTMLElement>(".llm-char");
+      // Hebrew words are revealed as whole units so cursive/bidi layout stays intact.
+      expect(spans).toHaveLength(2);
+      expect(spans[0]).toHaveTextContent("שלום");
+      expect(spans[1]).toHaveTextContent("עולם");
+      expect(spans[0].style.getPropertyValue("--i")).toBe("0");
+      expect(spans[1].style.getPropertyValue("--i")).toBe("1");
+      expect(container).toHaveTextContent("שלום עולם");
+    });
+
+    it("groups Arabic text into word fade units to preserve letter shaping", () => {
+      const { container } = render(
+        <LLMMessage smoothReveal>{"مرحبا بالعالم"}</LLMMessage>,
+      );
+      const spans = container.querySelectorAll<HTMLElement>(".llm-char");
+      expect(spans).toHaveLength(2);
+      expect(spans[0]).toHaveTextContent("مرحبا");
+      expect(spans[1]).toHaveTextContent("بالعالم");
+    });
+
+    it("sets dir=auto on the root for bidi auto-detection", () => {
+      const { container } = render(<LLMMessage>{"שלום"}</LLMMessage>);
+      expect(container.querySelector(".llm-message")).toHaveAttribute(
+        "dir",
+        "auto",
+      );
     });
 
     it("renders the whole document as one block when footnotes are present", () => {

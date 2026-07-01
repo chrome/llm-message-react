@@ -19,6 +19,64 @@ const useIsomorphicLayoutEffect =
 // trailing edge. Shared with the CSS `--llm-ramp` fallback.
 const SMOOTH_RAMP = 6;
 
+// How quickly the clipped height catches up to the reveal frontier. Kept much
+// shorter than `duration` so layout tracks the visible wave without lagging.
+const HEIGHT_SMOOTH_MS = 50;
+
+const REVEAL_UNIT_SELECTOR =
+  ".llm-char, .llm-fade-block, .llm-fade-block-inline";
+
+function readRevealIndex(el: HTMLElement): number | null {
+  const raw = el.style.getPropertyValue("--i");
+  const index = parseFloat(raw);
+  return Number.isFinite(index) ? index : null;
+}
+
+function measureContentHeight(root: HTMLElement): number {
+  const prev = root.style.height;
+  root.style.height = "auto";
+  const height = root.scrollHeight;
+  root.style.height = prev;
+  return height;
+}
+
+function measureFrontierHeight(root: HTMLElement, position: number): number {
+  // Use the maximum bottom edge of every revealed unit instead of a Range
+  // from the root start. Range bounding boxes are wrong for RTL/bidi text
+  // (they span the full line width) and for wrapped lines where the frontier
+  // sits on a later row.
+  const rootTop = root.getBoundingClientRect().top;
+  let maxBottom = 0;
+  let found = false;
+
+  for (const el of root.querySelectorAll<HTMLElement>(REVEAL_UNIT_SELECTOR)) {
+    const index = readRevealIndex(el);
+    if (index == null || index > position) {
+      continue;
+    }
+    found = true;
+    const bottom = el.getBoundingClientRect().bottom - rootTop;
+    if (bottom > maxBottom) {
+      maxBottom = bottom;
+    }
+  }
+
+  if (found && maxBottom > 0) {
+    return Math.min(measureContentHeight(root), Math.ceil(maxBottom));
+  }
+
+  const first = root.querySelector<HTMLElement>(REVEAL_UNIT_SELECTOR);
+  if (first) {
+    const top = first.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    if (top > 0) {
+      return Math.ceil(top);
+    }
+    return 0;
+  }
+
+  return measureContentHeight(root);
+}
+
 export interface UseSmoothRevealOptions {
   /**
    * The markdown source of the *active* (currently streaming) block; its growth
@@ -85,10 +143,61 @@ export function useSmoothReveal({
   const prevSourceRef = useRef("");
   const activeKeyRef = useRef(activeKey);
   const snapRef = useRef(false);
+  const displayedHeightRef = useRef(0);
   const [, forceCommit] = useState(0);
 
-  const setRevealVar = (value: number) => {
-    rootRef.current?.style.setProperty("--llm-reveal", String(value));
+  const clearHeight = () => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    root.style.height = "";
+    displayedHeightRef.current = 0;
+  };
+
+  const snapHeight = () => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    const height = measureContentHeight(root);
+    displayedHeightRef.current = height;
+    root.style.height = height > 0 ? `${height}px` : "";
+  };
+
+  const applyHeight = (position: number, dt: number) => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    const target = measureFrontierHeight(root, position);
+    let next = target;
+
+    if (dt > 0 && displayedHeightRef.current > 0) {
+      const alpha = 1 - Math.exp(-dt / HEIGHT_SMOOTH_MS);
+      next =
+        displayedHeightRef.current +
+        (target - displayedHeightRef.current) * alpha;
+    }
+
+    displayedHeightRef.current = next;
+    root.style.height = `${next}px`;
+  };
+
+  const setRevealVar = (
+    value: number,
+    dt = 0,
+    options?: { skipHeight?: boolean },
+  ) => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+    root.style.setProperty("--llm-reveal", String(value));
+    if (!options?.skipHeight) {
+      applyHeight(value, dt);
+    }
   };
 
   // A new active block began streaming: reset the wave so the new block reveals
@@ -155,6 +264,7 @@ export function useSmoothReveal({
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
+      clearHeight();
       return;
     }
 
@@ -170,7 +280,8 @@ export function useSmoothReveal({
       targetRef.current = end;
       velocityRef.current = 0;
       revealStateRef.current.committedUnits = total;
-      setRevealVar(end);
+      setRevealVar(end, 0, { skipHeight: true });
+      snapHeight();
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
@@ -200,7 +311,8 @@ export function useSmoothReveal({
 
     if (finishImmediately) {
       positionRef.current = targetRef.current;
-      setRevealVar(positionRef.current);
+      setRevealVar(positionRef.current, 0, { skipHeight: true });
+      snapHeight();
       if (revealStateRef.current.committedUnits !== total) {
         revealStateRef.current.committedUnits = total;
         forceCommit((n) => n + 1);
@@ -218,7 +330,8 @@ export function useSmoothReveal({
       if (next >= targetRef.current) {
         next = targetRef.current;
         positionRef.current = next;
-        setRevealVar(next);
+        setRevealVar(next, dt);
+        snapHeight();
         rafRef.current = null;
         // The wave has caught up: collapse the spans back to plain markup.
         if (revealStateRef.current.committedUnits !== totalRef.current) {
@@ -228,7 +341,7 @@ export function useSmoothReveal({
         return;
       }
       positionRef.current = next;
-      setRevealVar(next);
+      setRevealVar(next, dt);
       rafRef.current = requestAnimationFrame(tick);
     };
 

@@ -18,6 +18,33 @@ export interface FadeRehypePluginOptions {
 
 const CHAR_CLASS = "llm-char";
 const FADE_CLASS = "llm-fade";
+
+/**
+ * Scripts where wrapping each code unit in its own `<span>` breaks cursive
+ * shaping (Arabic) or makes the reveal look scrambled (Hebrew and other RTL
+ * scripts). These strings are revealed word-by-word instead of character-by-
+ * character; whitespace stays plain text so bidi layout is not disturbed.
+ */
+const WORD_UNIT_RE =
+  /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+function needsWordUnits(text: string): boolean {
+  return WORD_UNIT_RE.test(text);
+}
+
+/** Split a text node into reveal units (characters or words). */
+function segmentForReveal(text: string): string[] {
+  if (!needsWordUnits(text)) {
+    return Array.from(text);
+  }
+  const segments: string[] = [];
+  for (const part of text.split(/(\s+)/)) {
+    if (part.length > 0) {
+      segments.push(part);
+    }
+  }
+  return segments;
+}
 const BLOCK_CLASS = "llm-fade-block";
 const BLOCK_INLINE_CLASS = "llm-fade-block-inline";
 /**
@@ -108,7 +135,7 @@ export function createFadeRehypePlugin(options: FadeRehypePluginOptions) {
         if (/^\s*$/.test(node.value)) {
           return [node];
         }
-        const chars = Array.from(node.value);
+        const segments = segmentForReveal(node.value);
         const out: ElementContent[] = [];
         let plain = "";
 
@@ -119,10 +146,16 @@ export function createFadeRehypePlugin(options: FadeRehypePluginOptions) {
           }
         };
 
-        for (const ch of chars) {
+        for (const segment of segments) {
+          // Whitespace carries no glyph to fade; keep it as plain text so
+          // flex/list layout and bidi runs are not disturbed.
+          if (/^\s+$/.test(segment)) {
+            plain += segment;
+            continue;
+          }
           const index = counter.unit++;
           if (index < state.committedUnits) {
-            plain += ch;
+            plain += segment;
             continue;
           }
           flushPlain();
@@ -130,7 +163,7 @@ export function createFadeRehypePlugin(options: FadeRehypePluginOptions) {
             type: "element",
             tagName: "span",
             properties: { className: [CHAR_CLASS], style: `--i:${index}` },
-            children: [{ type: "text", value: ch }],
+            children: [{ type: "text", value: segment }],
           });
         }
 

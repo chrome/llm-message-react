@@ -144,7 +144,13 @@ export function LLMMessage({
   return (
     <div
       ref={rootRef}
-      className={cx("llm-message", classNames?.root, className)}
+      dir="auto"
+      className={cx(
+        "llm-message",
+        smoothReveal ? "llm-smooth-reveal" : undefined,
+        classNames?.root,
+        className,
+      )}
       style={rootStyle}
       {...rest}
     >
