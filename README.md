@@ -182,17 +182,6 @@ This is on by default and needs no configuration. The one trade-off is that cons
 <LLMMessage blockMemoization={false}>{content}</LLMMessage>
 ```
 
-The repair function is also exported if you need it directly, alongside the LaTeX preprocessing helpers:
-
-```ts
-import {
-  completePartialTokens,
-  preprocessLaTeX,
-  escapeBrackets,
-  escapeMhchem,
-} from "llm-message-react";
-```
-
 ## Theming
 
 You have three independent ways to control the look, from lightest to fullest:
